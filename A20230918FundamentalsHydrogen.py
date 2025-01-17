@@ -5,19 +5,9 @@ Created on Mon Aug  1 19:48:25 2022
 @author: Konin045
 """
 
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from matplotlib.ticker import FormatStrFormatter
-import csv
 from scipy.optimize import curve_fit
-import math
-import time
-from datetime import date
-import seaborn as sns
-import sys
-import os
 import pickle
 import A20240103battery as battery
 
@@ -32,6 +22,7 @@ eta_e = 0.7
 eta_c = eta_H2e * eta_e  #efficiency energy conversion p2h2p
 c_r_NL = 4.5
 CRsNL = np.array([3.0, 6.0, 2.0])
+alt_cost_factor = 0.5 #factor by which the cost come down in alternative scenario compared with the original
 
 ####################################################
 
@@ -44,17 +35,29 @@ def func_q(x, beta, eps_sa):
 def func_g(x, beta, eps_sa):
     return eps_sa - beta / x**2 
 
-def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare, CRs, cap_hydro, f_star_hydro_iea, method_hydro, battery_size, bat_ref_level):
+def calc_grid_decarb_level(CRs,rho,r_optH,flevels):    #from rho, find the grid decarbonisation level, i.e. 1 - f_rho    
+    f_rho = np.zeros(len(CRs))
+    for k in range(0,len(CRs)):
+        f_rho[k] = np.interp(-rho[k], -r_optH[k,:], flevels) #minus sign is because np.interp assumes increasing array 
+    decarbonisation_threshold = 1. - f_rho
+    curtailment = (rho + f_rho - 1.) / rho
+    return decarbonisation_threshold, curtailment
+
+def movingaverage (values, window):
+    weights = np.repeat(1.0, window)/window
+    sma = np.convolve(values, weights, 'valid')
+    return sma
+
+def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare, CRs, cap_hydro, f_star_hydro_iea, method_hydro, cap_fact_pv, cap_fact_wind, battery_size, bat_ref_level):
     c_r = c_r_NL * CRs/CRsNL
     c_e = c_r/CRs
     defaultcolour = 'darkgreen'
     colourfit = 'olive'
     scenario_names = [' (reference)', ' (future)', ' (current)']
+    d_unsorted = df['d'].values.copy()
     p_unsorted = df['p'].values.copy()
     p_unsorted = p_unsorted / np.mean(p_unsorted)
-    #battery_size = 1.0
     p_unsorted_no_bat = p_unsorted.copy()
-    #bat_ref_level = -(1.-1./1.305)
     if battery_size > 0.0:
         #bat_ref_level = -(1.-1./1.31)
         p_unsorted, Ebat = battery.p_after_battery(1.0 - p_unsorted + bat_ref_level, battery_size) 
@@ -63,9 +66,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
         Ebat = np.zeros(len(p_unsorted))
     mean_p_unsorted = np.mean(p_unsorted+1e-12)
     p_unsorted = (p_unsorted+1e-12) / mean_p_unsorted #1e-12 just to get rid of zeros in 100% solar scenario's, just to avoid numerical issues
-    #mean_p_unsorted_no_bat = np.mean(p_unsorted_no_bat+1e-12)
     p_unsorted_no_bat = (p_unsorted_no_bat+1e-12) / mean_p_unsorted 
-    #cor_bat_loss = mean_p_unsorted / mean_p_unsorted_no_bat# the conversion losses of the battery. you will need a bit more renewables.
     p_array = np.sort(p_unsorted)[::-1]
     p_array_no_bat = np.sort(p_unsorted_no_bat)[::-1]
 
@@ -75,18 +76,10 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.xlabel(r'$t$' + ' (hours)')
     plt.ylabel(r'$p / D$')
     plt.ylabel(r'$p$')
-    #plt.legend()
     plt.tight_layout()
     plt.savefig(folder + '\\power profile ' + scenario, dpi=600,bbox_inches='tight')
     
-    #df.sort_values(by=['p'], inplace=True, ascending=False)
-    #p_array = df['p'].values / np.mean(df['p'].values) #normalize to 1 in case this has not been done yet
-    #p_array = (p_array+1e-9) / np.mean(p_array+1e-9) #a cut-off, otherwise we run into trouble with divisions by zero and multiplications with infinity
-    #same for p_unsorted (revisit cause poor coding style)
-    #p_unsorted = p_unsorted / np.mean(p_unsorted)
-    #p_unsorted = (p_unsorted+1e-9) / np.mean(p_unsorted+1e-9)
-    
-    
+        
     Tau =  np.divide(list(range(T)), T)+1.0/T # extra term to make it 1 for complete year
     plt.figure()
     plt.plot(Tau, p_array, label='power duration curve') 
@@ -128,7 +121,6 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     ax1.text(0.01, p_array[4400]+0.05, r'$b$', dict(size=10))
     ax1.text(4400/len(Tau)+0.01, 0.05, r'$\tau\left(b\right)$', dict(size=10))
     ax1.set_xlabel(r'$\tau$' + ' (years)', dict(size=15))
-    #ax1.set_ylabel(r'$\bar{p}$', dict(size=15))
     ax1.set_ylabel(r'$\bar{p}$', dict(size=15))
     ax1.set_yticks([])
     ax1.set_xticks([0,1])
@@ -145,7 +137,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     ax2.set_xticks([0,1,2])
     ax2.set_yticks([0,1])
     plt.savefig(folder + '\\Integralvstau plus inset' + scenario, dpi=600,bbox_inches='tight')  
-    #plt.set_tight_layout()
+
     
     
     plt.figure()
@@ -210,7 +202,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     #now plot specifics for point Z, Y0, X0, and O 
     posX = 0.45
     posY = 2.1
-    #plt.figure(figsize=(6, 8))
+
     plt.figure(figsize=(6.4, 4.8))
         
     ax=plt.subplot(2,3,4)
@@ -378,7 +370,14 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
         popt, pcov = curve_fit(func, r_optH[k,len(hlevels):], e_optH[k,len(hlevels)::])
         eps[k] = popt[0]
         rho[k] = popt[1]
+        
+    #determine epsilon for X 
+    popt, pcov = curve_fit(func, r, eX)
+    epsX = popt[0]
+    rhoX = popt[1] #note that one can derive that epsX = 1/rhoX    
     
+    decarbonisation_threshold,curtailment = calc_grid_decarb_level(CRs,rho,r_optH,flevels)
+
     e_star = np.zeros(len(CRs))
     r_star = np.zeros(len(CRs))
     fig = plt.figure()
@@ -422,8 +421,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.savefig(folder + '\\flevelsin e r space star wo title' + scenario, dpi=600,bbox_inches='tight')   
     plt.title(r'$s=%.2f$' %PVshare, dict(size=10), color='k')
     plt.savefig(folder + '\\flevelsin e r space ' + scenario, dpi=600,bbox_inches='tight')
-    #with open(folder + '\\myplot.dat', 'wb') as f:
-    #    pickle.dump(fig, f)
+
     plt.ylim(0.0,12.0)
     plt.xlim(0.0,7.5)
     plt.savefig(folder + '\\flevelsin e r space wide ' + scenario, dpi=600,bbox_inches='tight') 
@@ -445,11 +443,18 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.xlim(0.0,1.0) 
     plt.savefig(folder + '\\eopt wide ' + scenario, dpi=600,bbox_inches='tight')
     
+    PV_capacity = PVshare / (cap_fact_pv * eps) #solar capacity per GW of electrolysis
+    wind_capacity = (1.-PVshare) / (cap_fact_wind * eps) #wind capacity per GW electrolysis
+    print('Per GW of electrolysis the nr of GW of solar capacity required is:')
+    print(PV_capacity)
+    print('Per GW of electrolysis the nr of GW of wind capacity required is:')
+    print(wind_capacity)
     
     index_optH = index_opt*np.heaviside(r_0 - r_opt,1) + index_0*np.heaviside(r_opt - r_0,0)
     index_optH = index_optH.astype('int')
     F = np.linspace(0.0, 1.0, 25)
-    plt.figure(figsize=(6.4,6.4))
+
+    plt.figure(figsize=(4.8,4.8))
     P_dir = 1.0 - r_optH * Idown[index_optH]
     P_dem_plus_curt = r_optH+flevels - (1.0-(P_dir+flevels))*(1.0/eta_c-1.0) #from the total (r+f) subtract losses that went into P2H2P converion
     k=2
@@ -472,14 +477,14 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.fill_between(1.0-flevels[:-1], 1.0, P_dir[k,:-1]+flevels[:-1], facecolor='olive', alpha=0.5, interpolate=True, edgecolor = 'None', label = 'hydrogen-to-power')
     plt.fill_between(1.0-flevels[:-1], P_dem_plus_curt[k,:-1], r_optH[k,:-1]+flevels[:-1], facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'White', label = 'power-to-hydrogen', hatch='.')
     plt.fill_between(1.0-flevels[:-1], 1.0, P_dem_plus_curt[k,:-1], facecolor='wheat', alpha=0.3, interpolate=True, edgecolor = 'None', label = 'curtailed')
-    #plt.fill_between(1.0-flevels[:-1], flevels[:-1], P_dir[k,:-1]+flevels[:-1], facecolor='darkgreen', alpha=0.7, interpolate=True, edgecolor = 'None', label = 'direct use')
+    
     F = np.arange(flevels[-2], 1.0+flevels[1]-flevels[0], flevels[1]-flevels[0])
     plt.fill_between(np.concatenate((1.0-flevels[:-1],1.0-F)), np.concatenate((flevels[:-1],F)), np.concatenate((P_dir[k,:-1]+flevels[:-1],np.ones(len(F)))), facecolor='darkgreen', alpha=0.7, interpolate=True, edgecolor = 'None', label = 'direct use')
     plt.text(0.2,0.3, 'fossil/firm', dict(size=15), color='white')
-    plt.text(0.55,0.7, 'direct renewable', dict(size=15), color='white')
-    plt.text(0.875,1.17, '  lost in' + "\n" +' P2H2P', dict(size=12))
-    plt.text(0.83,1.03, 'curtailed', dict(size=12))
-    plt.text(0.89,0.94, 'H2P', dict(size=12))
+    plt.text(0.45,0.65, 'direct renewable', dict(size=15), color='white')
+    plt.text(0.82,1.1, '  lost in' + "\n" +' P2H2P', dict(size=12))
+    plt.text(0.78,1.02, 'curtailed', dict(size=12))
+    plt.text(0.89,0.93, 'H2P', dict(size=12))
     plt.xlabel('level of decarbonisation ' +r'$1-f$', size=14)
     plt.ylabel('energy ' + r'$E$', size=14)      
     plt.xticks(fontsize=14)
@@ -495,7 +500,6 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     H_PowerFirst = (f_PowerFirst-flevels)/eta_H2e
     F = np.arange(flevels[-2], 1.0+flevels[1]-flevels[0], flevels[1]-flevels[0])
     P_dem_plus_curt = r_optH + f_PowerFirst - (1.0-(P_dir+f_PowerFirst))*(1.0/eta_c-1.0) - H_PowerFirst*(1.0/eta_e-1.0) #from the total (r+f) subtract losses that went into P2H2P conversion and into P2Hexp 
-#    plt.figure(figsize=(6,6))
     plt.figure()
     plt.plot(r_optH[k,:-1],1.0+H_PowerFirst[:-1],'k')#, label='H exp')
     plt.plot(r_optH[k,:-1],r_optH[k,:-1]+f_PowerFirst[:-1],'k')# label='lost')
@@ -522,11 +526,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.text(2.2,1.3, 'export H'+r'$_2$', dict(size=14), color='k')
     plt.savefig(folder + '\\phasediagram vs r  - power first -with text' + scenario, dpi=600,bbox_inches='tight')    
 
-    #now as a functio of r for hydrogen export first scenario
-    #E_e_HFirst = r_optH * (Iup[index_optH] - Iup[index_j_opt])
-    #H_exp_HFirst = eta_e * E_e_HFirst[0,:]
-    #f_HFirst = eta_H2e*H_exp_HFirst + flevels
-    
+
     #now as a functio of r for hydrogen export first scenario
     f_HFirst = 1 - P_dir[0,:]
     H_exp_HFirst = (f_HFirst-flevels)/eta_H2e
@@ -565,7 +565,6 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     cost = np.zeros((len(CRs),len(flevels)))
     for k in range(0,len(CRs)):
         #cost of the electrolyzer varies en of renewables is fixed
-        #cost[k,:] = CRs[0] * r_optH[k,:] + CRs[0] / CRs[k]* e_optH[k,:]
         cost[k,:] = c_r[k] * r_optH[k,:] + c_e[k]* e_optH[k,:]
     costY = c_r[0] * r #Y is characterized by no electrolysis, so no costs for electrolyzers
     #eX = fX + r - 1.0
@@ -595,42 +594,17 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.savefig(folder + '\\cost', dpi=300,bbox_inches='tight') 
     plt.close('all')
     
-# =============================================================================
-#     #plot the total costs for old scenarios
-#     c_r = CRs[0]/3.0*np.array([3.0, 3.0, 2.1, 2.1, 1.2])
-#     c_e = np.array([1.5, 1.0, 0.7, 0.35, 0.2])
-#     c_f = np.array([3.0, 3.0, 3.57, 3.57, 3.6])
-#     plt.figure() 
-#     costtot = np.zeros((len(c_r),len(flevels)))
-#     for l in range(0,len(c_r)):
-#         labelname = r'$c_r=%5.2f, c_e=%5.2f, c_f=%5.2f$' % (c_r[l], c_e[l], c_f[l])
-#         for k in range(0,len(CRs)):
-#             if abs(CRs[k] - c_r[l]/c_e[l]) <= 0.01:
-#                 costtot[l,:] = c_r[l] * r_optH[k,:] + c_e[l] * e_optH[k,:] + c_f[l] * flevels
-#                 costtot_high = c_r[l] * (1-F_high) + c_f[l] * F_high
-#                 f_for_plot = np.concatenate((flevels,F_high))
-#                 costtot_for_plot = np.concatenate((costtot[l,:],costtot_high))
-#                 plt.plot(1.0 - f_for_plot, costtot_for_plot, label=labelname)
-#     plt.xlabel(r'$1-f$')
-#     plt.ylabel(r'$C_{tot} (\$/W)$') 
-#     plt.legend()  
-#     plt.xlim(0.0,1.0)
-#     #plt.ylim(0.0,25) 
-#     plt.tight_layout()   
-#     plt.savefig(folder + '\\costtot ' + scenario, dpi=300,bbox_inches='tight') 
-# =============================================================================
-    
-    #plot the cost differential
-    #c_r = np.array([3.0, 1.2, 3.0]) #reference, future, current
-    #c_e = np.array([1.0, 0.2, 1.5])
-    # c_r = np.array([3.0, 3.0, 3.0]) #reference, future, current
-    # c_e = np.array([1.0, 0.5, 1.5])
-    #c_r = np.array([CRs[0], CRs[0], CRs[0]]) #reference, future, current
-    #c_e = np.array([1.0, CRs[0]/CRs[1], CRs[0]/CRs[2]])
-    
-    plt.figure()
+
+
+    plt.figure(figsize=(4.8,4.8))
     costdif = np.zeros((len(CRs),len(flevels)))
     costabs = np.zeros((len(CRs),len(flevels))) #needed later
+    #first compute the cost difference for scenario X (cheap electrolysis)
+    costabsX = c_r[0] * r
+    costdifX = costabsX / (1 - fX)
+    plt.plot(1 - fX,costdifX, color ='navy', label ='CR'+ r'$=\infty$' + ' (X: zero cost electrolysis)' )
+    plt.plot(1 - fX,alt_cost_factor*costdifX, color ='navy', ls= 'dashed')
+    #now for the scenarios
     for k in range(0,len(CRs)):
         labelname = 'CR'+ r'$=%.0f$' % CRs[k] + scenario_names[k]
         costabs[k,:] = c_r[k] * r_optH[k,:] + c_e[k] * e_optH[k,:]
@@ -639,24 +613,27 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
         f_for_plot = np.concatenate((flevels,F_high))
         costdif_for_plot = np.concatenate((costdif[k,:],costdif_high))
         plt.plot(1.0 - f_for_plot, costdif_for_plot, color=defaultcolour, alpha = alpha_values[k], label=labelname)
-        #plt.text(1.01,costdif[k,len(hlevels)]-0.01, r'$%5.2f \ €/W$' % (costdif[k,len(hlevels)]), dict(size=10), color='k')
+        if k<2: #if alternative scenario exist (i.e. reference and future)
+            plt.plot(1.0 - f_for_plot, alt_cost_factor*costdif_for_plot, color=defaultcolour, alpha = alpha_values[k], ls= 'dashed')
+        #plt.text(1.01,costdif[k,len(hlevels)]-0.01, r'$%5.2f \ €/W$' % (costdif[k,len(hlevels)]), dict(size=10), color='k')    
+    plt.text(0.05,costdif_for_plot[-1]-0.4, 'main cost scenrios', dict(size=13), color='k')
+    plt.text(0.05,alt_cost_factor*costdif_for_plot[-1]-0.4, 'low renewables cost scenarios', dict(size=13), color='k')
     plt.ylim(0.0,9)
     plt.xlim(0.0,1.0)
     plt.xlabel(r'level of decarbonisation $1-f$', fontsize=13)
-    #plt.ylabel(r'$\frac{\Delta C } {- \Delta f }(\$/W)$')   
+  
     plt.ylabel(r'decarbonisation cost $-\Delta C / \Delta f \ \ \left(€/W\right)$', fontsize=13)
-    plt.xticks(fontsize=11.5)
-    plt.yticks([0,2,4,6,8],fontsize=11.5)
+    plt.xticks(fontsize=14)
+    plt.yticks([0,2,4,6,8],fontsize=14)
     handles, labels = plt.gca().get_legend_handles_labels()
-    order = [2,0,1]
-    plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order],loc='lower left', framealpha=1.0)
+    order = [3,1,2,0]
+    plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order],loc='upper left', framealpha=1.0)
+    plt.tight_layout()
     plt.savefig(folder + '\\deltacost ' + scenario, dpi=600,bbox_inches='tight')
     plt.close('all')
     
     cost_star = costabs[:,len(hlevels)]
     
-    #method_hydro='IEA'
-    #np.zeros((len(CRs),len(flevels)))
     
     f_star_hydro=np.zeros(len(CRs))
     e_star_hydro=np.zeros(len(CRs))
@@ -705,40 +682,37 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
         print(r_star_hydro)
         
            
-    #plt.scatter(r_hydro,f_hydro2)
-    #plt.scatter(r_hydro,f_hydro)
-    #plt.xlim(0.7,1.7)
-    #plt.ylim(-.2,0.2) 
 
     
+    #determine the electrolyser capacity and renewable production for full decarbonisation for scenario X
+    fXabs = np.absolute(fX)
+    index_fXabs = fXabs.argmin()
+    e_starX = eX[index_fXabs]
+    r_starX = r[index_fXabs]
 
 
 
-
-    #CRs = np.array([3., 6., 2.0,0.1])
     C_H2_sa = np.zeros((len(CRs), len(b)))
     b_min = np.zeros(len(CRs))
     b_min_arg = []
     C_H2_sa_min = np.zeros(len(CRs))
-    #c_e_sa= c_e#CRs[0]/CRs 
-    #for k in range(0,len(CRs)):
+
     for k in range(0,len(c_r)): 
-        #C_H2_sa[k,:] = c_e_sa[k] * (b + CRs[k]) / ( eta_e * (1.0 - Iup)) #FIX equation in paper
-        C_H2_sa[k,:] = c_e[k] * (b + CRs[k]) / ( eta_e * (1.0 - Iup)) #FIX equation in paper
+        C_H2_sa[k,:] = c_e[k] * (b + CRs[k]) / ( eta_e * (1.0 - Iup)) 
         b_min_arg.append(C_H2_sa[k,:].argmin())
         b_min[k] = b[b_min_arg[-1]]
         C_H2_sa_min[k] = C_H2_sa[k, b_min_arg[-1]]
     fig, ax1 = plt.subplots() 
     for k in range(0,len(CRs)):
         labelname = "CR" + r'$=%.0f$' % CRs[k] + scenario_names[k]
-        #labelname = r'$CR=%.0f, c_e=%.1f$' % (CRs[k], c_e_sa[k])
+
         plt.plot(b, C_H2_sa[k,:], label=labelname, color = defaultcolour, alpha = alpha_values[k])
         plt.scatter(b_min[k],C_H2_sa_min[k], color = defaultcolour, alpha = alpha_values[k])    
-    #labelname = r'$CR\rightarrow \infty, c_e=0$' 
+
     labelname = r'$X$' 
-    #C_H2_sa_inf = CRs[0] / ( eta_e * (1.0 - Iup)) #since CRs[0]=c_r
+
     C_H2_sa_inf = c_r[0] / ( eta_e * (1.0 - Iup)) #since CRs[0]=c_r
-    #C_H2_sa_inf = CRs[0] / ( eta_e * (b - 1.0 + Iup)) #since CRs[0]=c_r #doesnt work
+
     plt.plot(b, C_H2_sa_inf, label=labelname, color='navy')
     plt.scatter(b[C_H2_sa_inf.argmin()], C_H2_sa_inf.min(), color='navy')
     plt.xlabel(r'relative electrolyser size $e/r$')
@@ -756,7 +730,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     ylim_max2 = 160
     ax2.set_ylim(0.0,ylim_max2) 
     ax2.set_ylabel(r'power converted $E_e/r\  (\%)$', color='darkorange') 
-    #ax2.set_yticks([0, 20, 40, 60, 80, 100], color='blue') #use ax.thick_params
+
     ax2.tick_params(axis='y', colors='darkorange')
     ax2.set_yticks([0, 20, 40, 60, 80, 100])
     ax2.yaxis.label.set_color('darkorange')
@@ -801,7 +775,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     fig, ax1 = plt.subplots()
     plt.plot(H_PowerFirst[:len(hlevels)], Synergy / H_PowerFirst[:len(hlevels)], label=labelname, color=defaultcolour)
     plt.xlabel(r'hydrogen produced $H/D$',  fontsize=12)
-    plt.ylabel(r'relative synergy $S/H \ (€/W_H)$', fontsize=12)  #r'Cost $C \ (€/W)$'
+    plt.ylabel(r'relative synergy $S/H \ (€/W_H)$', fontsize=12)  
     plt.xlim(xmin=0.0)
     plt.yticks([0,0.5,1,1.5,2])
     plt.xticks([0,0.5,1,1.5,2])
@@ -809,7 +783,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.ylim(0.0, max_syn_rel*C_H2_sa_min[0]) 
     ax2 = ax1.twinx()
     ax2.plot(H_PowerFirst[:len(hlevels)], 100*Synergy_rel, label=labelname, color=defaultcolour)
-    ax2.set_ylabel(r'relative synergy $S/V_H \ (\%)$', fontsize=12)  #r'Cost $C \ (€/W)$'
+    ax2.set_ylabel(r'relative synergy $S/V_H \ (\%)$', fontsize=12)  
     ax2.set_ylim(0.0, 100*max_syn_rel)
     ax2.set_yticks([0,4,8,12,16,20])
     plt.savefig(folder + '\\Relative synergy double axes ' + scenario, dpi=600,bbox_inches='tight')
@@ -818,7 +792,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     #cost of decarbonizing the power system only for reference scenaario
     Vp = costdif[0, len(hlevels)] #at index len(hlevels): f=0
     H_indus_size = np.array([0.25, 0.5, 1.0]) #magnitude of non-power H2 in terms of size power system
-    #H_amount = r_optH[0,len(hlevels)] * H_indus_size #crude proxy. need to fix this
+
     H_amount =  H_indus_size
     VH2 = 0.0*H_indus_size
     Cint = 0.0*H_indus_size
@@ -854,8 +828,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     plt.legend(fontsize=8, loc= 'upper center')
     plt.ylim(ymax=16)
     plt.subplot(2,2,2)
-    #plt.xticks([i + barWidth for i in range(len(Synergy))],
-     #       [r'$H=E/4$', r'$H=E/2$', r'$H=E$'])
+
     br = [r'$H=D/4$', r'$H=D/2$', r'$H=D$']
     plt.bar(br, Synergy, color ='darkgray', width = barWidth,edgecolor ='k', label ='Synergy', alpha=alpha_values[0])
     plt.ylabel(r'Synergy $S \ (€/W)$')
@@ -901,8 +874,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
             index_e_contour_on_X = np.argmax(e_contour[:,level])
             if hlevels[level] > -0.51:
                 plt.text(-0.45+r[index_e_contour_on_X],0.05+e_contour[index_e_contour_on_X,level], labelname, dict(size=10), color='k')
-        #elif level % 2 == 0:
-            #plt.plot(r,e_contour[:,level], 'k--')
+
     plt.plot(r,eX, color='navy') #label='X'
     k=0
     labelname = 'CR'+ r'$=%.0f$' % CRs[k]
@@ -911,7 +883,7 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     r_prime = np.linspace(0.0, 8, 100)
     plt.plot(r_prime, b_min[k]*r_prime, color='k', ls='dotted', label=r'$e = \epsilon^{sa} r$')
     plt.plot(r_prime,0.0*r_prime, color='navy')
-    #plt.plot(r, b_min[k]*r, 'k--')                  
+                
     plt.ylim(0.0,7.0)
     plt.xlim(0.0,4.0)
     plt.fill_between(r, 0.0, eX, where=(r >= r[0]), facecolor='lightgray', alpha=0.3, interpolate=True, edgecolor = 'None')
@@ -942,13 +914,13 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0), facecolor=colourfit, alpha=0.7, interpolate=True, edgecolor = 'None')
     ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0 + e_optH0) & (r_optH0*p_array >= 1.0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
     ax1.fill_between(Tau, 1.0, 1.0 + e_optH0, where=(r_optH0*p_array >= 1.0 + e_optH0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
-    #ax1.set_tight_layout()
+
     ax2.plot(Tau, r_optH0*p_unsorted, label='power profile', lw=0.1, color = 'k')
     ax2.set_xlabel('time ' + r'$t$' + ' (years)')
     ax2.set_ylabel(r'$p$')
     ax2.set_xlim(0.0,1.0)
     ax2.set_ylim(0.0, 4.0)
-    #ax2.tight_layout()
+
     plt.savefig(folder + '\\power duration curve filled ' + scenario, dpi=600,bbox_inches='tight')
     ax1.plot(Tau, r_optH0*p_array_no_bat, label='power duration curve', color = 'k', lw=2) 
     ax1.plot(Tau, r_optH0*p_array, label='power duration curve', color = 'darkorange', lw=2)
@@ -958,6 +930,29 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     batname =  'battery level =%.4f' % bat_ref_level
     plt.title(batname)
     plt.savefig(folder + '\\power duration curve filled battery2' + scenario, dpi=600,bbox_inches='tight')
+
+    fig, ax1 = plt.subplots()
+    ax1.plot(Tau, r_optH0*p_array, label='power duration curve', color = 'k', lw=1.0) 
+    ax1.set_xlabel('duration ' + r'$\tau$' + ' (years)', dict(size=12))
+    ax1.set_ylabel('renewable power generation ' + r'$\bar{p}$', dict(size=12))
+    ax1.set_xlim(0.0,1.0)
+    ax1.set_ylim(0.0,4.0)
+    ax1.axhline(y = 1.0, color = 'k', lw=1.0)
+    ax1.axhline(y = r_optH0, color = 'k', linestyle = '--', lw=1.0)
+    ax1.axhline(y = 1.0 + e_optH0, color = 'k', linestyle = 'dotted', lw=1.0)
+    ax1.text(0.9, 1.05, r'$d=1$', dict(size=10))
+    ax1.text(0.9, 1.0 + e_optH0 + 0.05, r'$1+e$', dict(size=10))
+    ax1.text(0.9, r_optH0 + 0.05, r'$r$', dict(size=10))
+    ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0), facecolor=colourfit, alpha=0.7, interpolate=True, edgecolor = 'None')
+    ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0 + e_optH0) & (r_optH0*p_array >= 1.0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
+    ax1.fill_between(Tau, 1.0, 1.0 + e_optH0, where=(r_optH0*p_array >= 1.0 + e_optH0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
+    ax1.plot(Tau, r_optH0*p_array_no_bat, label='power duration curve', color = 'k', lw=2) 
+    ax1.plot(Tau, r_optH0*p_array, label='power duration curve', color = 'darkorange', lw=2)
+    plt.savefig(folder + '\\power duration curve filled battery without inset' + scenario, dpi=600,bbox_inches='tight')
+    batname =  'battery level =%.4f' % bat_ref_level
+    plt.title(batname)
+    plt.savefig(folder + '\\power duration curve filled battery2 without inset' + scenario, dpi=600,bbox_inches='tight')
+
     
     plt.figure(figsize=(6.4, 8))
     plt.subplot(8,1,1)
@@ -1056,17 +1051,51 @@ def analyse_power_and_hydrogen(df, folder, T, u, alpha_values, scenario, PVshare
     ax2.plot(range(6)[::-1], color='green')
     ax1.set_xlabel(r'$\tau$' + ' (years)')
     
+    #plots for variation in demand
+    delta_d = d_unsorted - 1.0
+    p_min_delta_d_unsorted = p_unsorted - delta_d
+    p_min_delta_d_array = np.sort(p_min_delta_d_unsorted)[::-1]
+    fig, ax1 = plt.subplots()
+    left, bottom, width, height = [0.25, 0.67, 0.58, 0.18]
+    ax2 = fig.add_axes([left, bottom, width, height])
+    ax1.plot(Tau, r_optH0*p_array, label='power duration curve', color = 'k', lw=1.0) 
+    ax1.set_xlabel('duration ' + r'$\tau$' + ' (years)', dict(size=12))
+    ax1.set_ylabel('net renewable power generation ' + r'$\overline{p-\delta d}$', dict(size=12))
+    ax1.set_xlim(0.0,1.0)
+    ax1.set_ylim(-0.333,4.0)
+    ax1.axhline(y = 1.0, color = 'k', lw=1.0)
+    ax1.axhline(y = r_optH0, color = 'k', linestyle = '--', lw=1.0)
+    ax1.axhline(y = 1.0 + e_optH0, color = 'k', linestyle = 'dotted', lw=1.0)
+    ax1.text(0.9, 1.05, r'$\langle d\rangle=1$', dict(size=10))
+    ax1.text(0.9, 1.0 + e_optH0 + 0.05, r'$1+e$', dict(size=10))
+    ax1.text(0.9, r_optH0 + 0.05, r'$r$', dict(size=10))
+    ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0), facecolor=colourfit, alpha=0.7, interpolate=True, edgecolor = 'None')
+    ax1.fill_between(Tau, 1.0, r_optH0*p_array, where=(r_optH0*p_array <= 1.0 + e_optH0) & (r_optH0*p_array >= 1.0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
+    ax1.fill_between(Tau, 1.0, 1.0 + e_optH0, where=(r_optH0*p_array >= 1.0 + e_optH0), facecolor='olivedrab', alpha=0.5, interpolate=True, edgecolor = 'None')
+
+    ax2.plot(Tau, r_optH0*p_unsorted, label='power profile', lw=0.1, color = 'k')
+    ax2.set_xlabel('time ' + r'$t$' + ' (years)')
+    ax2.set_ylabel(r'$p$')
+    ax2.set_xlim(0.0,1.0)
+    ax2.set_ylim(0.0, 4.0)
+
+    ax1.plot(Tau, r_optH0*p_array_no_bat, label='power duration curve', color = 'k', lw=2) 
+    ax1.plot(Tau, r_optH0*p_min_delta_d_array, label='power duration curve', color = 'darkorange', lw=2)
+    ax2.plot(Tau, r_optH0*p_unsorted_no_bat, label='power profile', lw=0.1, color = 'k')
+    ax2.plot(Tau, d_unsorted, label='power profile', lw=0.1, color = 'darkorange') 
+    ax3 = ax2.twinx()
+    ax3.tick_params(axis='y', colors='darkorange')
+    ax3.set_yticks([0, 2, 4])
+    ax3.yaxis.label.set_color('darkorange')
+    ax3.spines['right'].set_color('darkorange')
+    ax3.set_ylabel(r'$d$', color='darkorange')
+    plt.savefig(folder + '\\power duration curve filled w demand' + scenario, dpi=600,bbox_inches='tight')
+    
     plt.close('all')
     
     #save some relevant data
     with open(folder + '\\data_for_run.dat', 'wb') as f:
-        pickle.dump([eps, rho, e_star, r_star, e_optH, cost_star, r_optH, f_star_hydro, r_star_hydro, e_star_hydro, cost_star_hydro], f)    
+        pickle.dump([eps, rho, e_star, r_star, e_optH, cost_star, r_optH, f_star_hydro, r_star_hydro, e_star_hydro, cost_star_hydro, flevels, hlevels], f)    
 
-    return Synergy, Vp, VH2, Cint, rho, eps, r_star, e_star,b_min, C_H2_sa_min, P_conv[b_min_arg], cost_star
-#code graveyard
-
-#retrieve data
-with open('data_for_run.dat', "rb") as input_file:
-    eps, rho, e_star, r_star, e_optH, cost_star, r_optH, f_star_hydro, r_star_hydro, e_star_hydro, cost_star_hydro= pickle.load(input_file)
-
+    return Synergy, Vp, VH2, Cint, rho, eps, r_star, e_star,b_min, C_H2_sa_min, P_conv[b_min_arg], cost_star, r_star_hydro, e_star_hydro, cost_star_hydro, flevels, hlevels, e_optH, r_optH, epsX, rhoX, r_starX, e_starX, f_star_hydro 
 

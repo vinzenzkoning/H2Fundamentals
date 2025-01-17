@@ -5,32 +5,17 @@ Created on Wed Jan  3 19:08:25 2024
 @author: Konin045
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from matplotlib.ticker import FormatStrFormatter
-import csv
-from scipy.optimize import curve_fit
-import math
-import time
-from datetime import date
-import seaborn as sns
-import sys
-import os
-import pickle
 
-#country = 'NL'
-#with open(country + '\\dataframe.dat', "rb") as input_file:
-#    df, solar, off, on, river, ee, cap_fact_pv, cap_fact_wind, cap_fact_on, cap_fact_off, cap_fact_river, CR_correction, cap_hydro, f_star_hydro_iea, method_hydro= pickle.load(input_file)
-#resLoad = 1.0 - df['p'].values/np.mean(df['p'].values) #1.0 because we assume flat demand
+import numpy as np
+
+
 
 def p_after_battery(resLoad, Pc):
     dT = 1. #measure time in hours
     
     etaE2S = 1.0#0.96 #efficiency from electricity to storage
     etaS2E = 1.0#0.96 #efficiency from storage to electricity
-    tau = 4.
+    tau = 4
     #ratio of the ouput power capacity (the max electricity that comes out of storage medium)
     #to input power capacity (the max electricity that goes into storage medium)
     ratioOutInP = 1#discharging can be done with the same rate as charging  
