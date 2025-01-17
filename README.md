@@ -1,12 +1,12 @@
 # Fundamentals of hydrogen production and use in a renewable power system
-##About
+#About
 With this code one can carry out the analysis presentend in the manuscript 'Fundamentals of hydrogen production and use in a decarbonising power system' by Gert Jan Kramer, Wouter van de Graaf, Vinzenz Koning. 
 All figures in both the main text and the supplementary information can be recreated.
 
-##Author
+#Author
 Vinzenz Koning. For questions please contact me at v.koning@uu.nl
 
-##Instruction
+#Instruction
 To run the analysis please run RunFundamentals.py. This will call all the other python functions. The only exception is Sankey.py, which is a stand-alone scripot with which Sankey diagram was made for Figure 1b of the paper.
 In the default settings, the code carries out the analysis for the Netherlands. This takes a few minutes on a laptop with the current high resolution settings and generates the plots in figures 1a, 2, 3, 6, 7b, Extended Data figure 4, and the figures in Supplementary Discussion 3.
 If you would like to run the analysis for other EU countries and generate Figure 5 and Extended Data Figures 1,2,3, please set Qruncountries to 'yes' in line 32 of RunFundamentals.py. This will take about an hour.
