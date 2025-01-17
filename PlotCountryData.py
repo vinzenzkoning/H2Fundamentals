@@ -6,26 +6,11 @@ Created on Tue Sep 19 09:00:14 2023
 """
 
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from matplotlib.ticker import FormatStrFormatter
 import matplotlib as mpl
-import csv
-from scipy.optimize import curve_fit
-import math
-import time
-from datetime import date
-import seaborn as sns
-import sys
-import os
 import pickle
 import geopandas as gpd
-import plotly.express as px
-import plotly
-import json
-import kaleido
-from urllib.request import urlopen
+
 
 def plotmap(gdf_rg0_joined, gdf_bn0, folder_gen, variable, label, fileatt, vmin, vmax):
     if vmin < -0.5: #vmin = -1 then simply use the default min max
@@ -46,62 +31,7 @@ def plotmap(gdf_rg0_joined, gdf_bn0, folder_gen, variable, label, fileatt, vmin,
     return 0
 
 def plotcountrydata(folder_gen, alpha_values, countries, eps_matrix, rho_matrix, e_star_matrix, r_star_matrix, f_star_hydro_matrix, cost_star_matrix, r_star_hydro_matrix, e_star_hydro_matrix, cost_star_hydro_matrix):
-# =============================================================================
-# timestamp = '20231230 2346 2u  0.00'
-# alpha_values=[1.0,0.6,0.3] 
-# 
-# countries = ['NL','AT','BE',
-# 'BG',
-# 'HR',
-# 'CY',
-# 'CZ',
-# 'DK',
-# 'EE',
-# 'FI',
-# 'FR',
-# 'DE',
-# 'EL',
-# 'HU',
-# 'IE',
-# 'IT',
-# 'LV',
-# 'LT',
-# 'LU',
-# 'MT',
-# 'PL',
-# 'PT',
-# 'RO',
-# 'SK',
-# 'SI',
-# 'ES',
-# 'SE']
-# #countries = ['NL']
-# 
-# plt.close('all')
-# size = len(countries)    
-# eps_matrix = np.zeros((size, len(alpha_values)))
-# rho_matrix = np.zeros((size, len(alpha_values)))
-# r_star_matrix = np.zeros((size, len(alpha_values)))
-# e_star_matrix = np.zeros((size, len(alpha_values)))  
-# cost_star_matrix = np.zeros((size, len(alpha_values))) 
-# f_star_hydro_matrix = np.zeros((size, len(alpha_values))) 
-# r_star_hydro_matrix = np.zeros((size, len(alpha_values))) 
-# e_star_hydro_matrix = np.zeros((size, len(alpha_values)))
-# cost_star_hydro_matrix = np.zeros((size, len(alpha_values))) 
-# for i in range(0,size): 
-#     country = countries[i]
-#     with open(country + '\\' + timestamp + '\\data_for_run.dat', "rb") as input_file:
-#         eps, rho, e_star, r_star, e_optH, cost_star, r_optH, f_star_hydro, r_star_hydro, e_star_hydro, cost_star_hydro  = pickle.load(input_file)
-#     eps_matrix[i,]=eps
-#     rho_matrix[i,]=rho
-#     r_star_matrix[i,]=r_star
-#     e_star_matrix[i,]=e_star
-#     cost_star_matrix[i,]=cost_star
-#     f_star_hydro_matrix[i,] = f_star_hydro 
-#     r_star_hydro_matrix[i,] = r_star_hydro
-#     e_star_hydro_matrix[i,] = e_star_hydro 
-#     cost_star_hydro_matrix[i,] = cost_star_hydro
-# =============================================================================
+
 
     plt.close('all')
     #if not os.path.exists(timestamp):
@@ -260,38 +190,4 @@ def plotcountryinputdata(gdf_rg0_joined):
     return 0
 
 
-# #temporary. this could works under the assumption that C=3 for renewables and C=1 for electrolyzers.
-# #just to check if computation above is consistent
-# gdf_rg0_joined['investment_cost'] = 3.0*gdf_rg0_joined['CR_correction_list']*gdf_rg0_joined['rstarCR1'] + 1.0* gdf_rg0_joined['estarCR1']
-# plotmap('investment_cost', r'investment cost', '\\investment cost vs country map', -1,-1)
-# plt.close('all')
-# #plotmap('CR1')
-# #plotmap('epsCR1')
-# #plotmap('epsCR1')
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# path_rg2 = "europe.geojson"
-# gdf_rg2 = gpd.read_file(path_rg2)
-# gdf_rg2.to_crs(3035)
-# gdf_rg2.plot()
-# world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
-# world.plot()
-# world = world[(world.name == "Kosovo")]
-# world = world.to_crs({'init': 'epsg:3035'})
-# world.plot()
